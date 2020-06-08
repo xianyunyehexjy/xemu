@@ -4418,15 +4418,6 @@ if test "$xemu_gtk" != "no"; then
 fi
 
 ##########################################
-# openssl probe
-if $pkg_config --exists openssl; then
-    QEMU_CFLAGS="$QEMU_CFLAGS $($pkg_config --cflags openssl)"
-    LIBS="$LIBS $($pkg_config --libs openssl)"
-else
-    feature_not_found "openssl" "Install openssl-dev"
-fi
-
-##########################################
 # libxml2 probe
 if test "$libxml2" != "no" ; then
     if $pkg_config --exists libxml-2.0; then
