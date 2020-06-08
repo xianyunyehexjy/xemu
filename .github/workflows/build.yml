@@ -49,6 +49,7 @@ jobs:
         7z x -y msys64.7z "-oC:\tools\"
         echo "Updating MSYS2 environment..."
         C:\tools\msys64\usr\bin\bash.exe -lc "pacman -Syu --noconfirm"
+        C:\tools\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm --needed libcurl-devel"
     # - name: Initialize Compiler Cache
     #   id: cache
     #   uses: actions/cache@v1
