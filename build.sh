@@ -162,7 +162,7 @@ set -x # Print commands from now on
     --enable-trace-backends="nop" \
     --enable-sdl \
     --enable-opengl \
-    --disable-curl \
+    --enable-curl \
     --disable-vnc \
     --disable-vnc-sasl \
     --disable-docs \
