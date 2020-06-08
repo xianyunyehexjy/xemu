@@ -22,11 +22,13 @@
 #include <glib.h>
 #include <glib/gi18n.h>
 #include <stdio.h>
+#include <curl/curl.h>
+
 #include "xemu-reporting.h"
-#define CPPHTTPLIB_OPENSSL_SUPPORT 1
-#include "httplib.h"
 #include "json.hpp"
 using json = nlohmann::json;
+
+#define DEBUG_COMPAT_SERVICE 0
 
 CompatibilityReport::CompatibilityReport()
 {
@@ -59,55 +61,61 @@ const std::string &CompatibilityReport::GetSerializedReport()
 	return serialized;
 }
 
+/*
+ * Makes POST request to file the report via libcurl.
+ * Based on https://curl.haxx.se/libcurl/c/http-post.html.
+ */
 bool CompatibilityReport::Send()
 {
-	// Serialize the report
-	const std::string &s = GetSerializedReport();
+	CURL *curl;
+	CURLcode res = CURLE_FAILED_INIT;
+	long http_res_code = 0;
 
-	httplib::SSLClient cli("127.0.0.1", 443);
-	// httplib::SSLClient cli("reports.xemu.app", 443);
+	/* In windows, this will init the winsock stuff */ 
+	curl_global_init(CURL_GLOBAL_ALL);
 
-	cli.set_follow_location(true);
-	cli.set_timeout_sec(5);
-	// cli.enable_server_certificate_verification(true); // FIXME: Package cert bundle
-
-	auto res = cli.Post("/compatibility", s, "application/json");
-
-	if (!res) {
-#if 0 // FIXME: Handle SSL certificate verification failure
-#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
-	    auto result = cli.get_openssl_verify_result();
-	    if (result) {
-	      fprintf(stderr, "verify error: %s\n", X509_verify_cert_error_string(result));
-	    }
-#endif
+	curl = curl_easy_init();
+	if (curl) {
+#if DEBUG_COMPAT_SERVICE
+		curl_easy_setopt(curl, CURLOPT_URL, "https://127.0.0.1/compatibility");
+		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0);
+		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0);
+#else
+		curl_easy_setopt(curl, CURLOPT_URL, "https://reports.xemu.app/compatibility");
 #endif
 
-		result_code = -1;
-		result_msg = "Failed to connect";
+		const std::string &s = GetSerializedReport();
+		curl_easy_setopt(curl, CURLOPT_POSTFIELDS, s.c_str());
+		res = curl_easy_perform(curl);
+		if (res == CURLE_OK) {
+			curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_res_code);
+		}
+		curl_easy_cleanup(curl);
+	}
+
+	curl_global_cleanup();
+
+	if (res != CURLE_OK) {
+		result_code = res;
+		result_msg = curl_easy_strerror(res);
 	    return false;
 	}
 
-	result_code = res->status;
-
-	switch(res->status) {
+	result_code = http_res_code;
+	switch (http_res_code) {
 	case 200:
 		result_msg = "Ok";
 		return true;
-
 	case 400:
 	case 411:
 		result_msg = "Invalid request";
 		return false;
-
 	case 403:
 		result_msg = "Invalid token";
 		return false;
-
 	case 413:
 		result_msg = "Report too long";
 		return false;
-
 	default:
 		result_msg = "Unknown error occured";
 		return false;
