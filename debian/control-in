@@ -65,6 +65,7 @@ Build-Depends: debhelper (>= 11),
 # libsasl2-dev,
 # --disable-sdl
  libsdl2-dev,
+ libsamplerate0-dev,
 # --enable-seccomp	amd64|arm64|armel|armhf|i386|mips64el|mipsel|ppc64el|s390x|hppa|powerpc|ppc64|riscv64|x32
 # libseccomp-dev        [amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x hppa powerpc ppc64 riscv64 x32],
 # --enable-slirp=system
