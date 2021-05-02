@@ -9,6 +9,7 @@ Build-Depends: debhelper (>= 11),
 # pc-bios/*.dts => *.dtb (PPC firmware)
 # device-tree-compiler,
  python3:any,
+ ninja-build, meson (>> 0.55.3-1~),
 # --enable-docs
 # texinfo, python3-sphinx,
 # iasl (from acpica-tools) is used only in a single test these days, not for building
