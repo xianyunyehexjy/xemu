@@ -79,8 +79,8 @@ binary-arch:
 	dh_prep -a
 	dh_installdirs -a
 
-	mkdir -p $(sysdatadir)
-	cp -r dist/data $(sysdatadir)
+	# mkdir -p $(sysdatadir)
+	# cp -r dist/data $(sysdatadir)
 	install -DTm 0755 dist/xemu debian/xemu/usr/bin/xemu
 	install -DT ui/xemu.desktop debian/xemu/usr/share/applications/xemu.desktop
 	install -DT ui/icons/xemu_16x16.png debian/xemu/usr/share/icons/hicolor/16x16/apps/xemu.png
