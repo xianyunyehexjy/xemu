@@ -27,4 +27,4 @@ echo " -- Matt Borgerson <contact@mborgerson.com>  $(date -R)" >> debian/changel
 # Place specific repo version in control file
 echo -e " .\n This package was built from $(git describe --match 'xemu-v*') on $(date -R)\n" >> debian/control
 
-debuild --no-lintian --preserve-env -us -uc
+debuild --preserve-env -us -uc
