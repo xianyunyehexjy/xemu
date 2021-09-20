@@ -5,11 +5,13 @@ on:
     paths-ignore:
       - '.github/**'
       - '!.github/workflows/**'
+      - 'ubuntu-win64-cross/**'
       - 'README.md'
   pull_request:
     paths-ignore:
       - '.github/**'
       - '!.github/workflows/**'
+      - 'ubuntu-win64-cross/**'
       - 'README.md'
 
 jobs:
