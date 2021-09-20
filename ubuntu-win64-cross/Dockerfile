@@ -56,11 +56,9 @@ RUN cd /opt \
             openssl \
             cmake
 
-COPY sdl2.mk                                       /opt/mxe/src/sdl2.mk
-COPY 001-fix-cmake-target-relocation-2.0.12.patch  /opt/mxe/src/sdl2-1-cmake.patch
-COPY 002-fix-link-order.patch                      /opt/mxe/src/sdl2-2-link.patch
-COPY 003-fix-static-library-name.patch             /opt/mxe/src/sdl2-3-static.patch
-COPY 004-dont-duplicate-libs-in-libs-private.patch /opt/mxe/src/sdl2-4-fix-duplicate-libs.patch
+COPY sdl2.mk /opt/mxe/src/sdl2.mk
+RUN rm /opt/mxe/src/sdl2-*.patch
+COPY sdl2-1-fixes.patch /opt/mxe/src/sdl2-1-fixes.patch
 
 RUN make -C /opt/mxe \
         MXE_TARGETS=x86_64-w64-mingw32.static \

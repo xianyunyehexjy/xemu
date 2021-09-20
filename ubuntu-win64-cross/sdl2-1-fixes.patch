@@ -1,0 +1,80 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 26fe83205..4d0cf23af 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -2343,12 +2343,12 @@ listtostr(EXTRA_CFLAGS _EXTRA_CFLAGS)
+ set(EXTRA_CFLAGS ${_EXTRA_CFLAGS})
+ 
+ # Compat helpers for the configuration files
+-if(NOT CMAKE_HOST_WIN32)
++if(NOT MSVC OR CYGWIN) #CMAKE_HOST_WIN32)
+   # TODO: we need a Windows script, too
+   execute_process(COMMAND sh ${SDL2_SOURCE_DIR}/build-scripts/updaterev.sh
+     WORKING_DIRECTORY ${SDL2_BINARY_DIR})
+ endif()
+-if(NOT WINDOWS OR CYGWIN OR MINGW)
++if(NOT MSVC) #WINDOWS OR CYGWIN OR MINGW)
+ 
+   set(prefix ${CMAKE_INSTALL_PREFIX})
+ 
+@@ -2384,12 +2384,12 @@ Libs.private:")
+     listtostrrev(SDL_LIBS _SDL_LIBS)
+     set(SDL_LIBS ${_SDL_LIBS})
+   else()
+-    listtostr(EXTRA_LIBS _EXTRA_LIBS "-l")
++    listtostrrev(EXTRA_LIBS _EXTRA_LIBS "-l")
+     set(SDL_STATIC_LIBS ${SDL_LIBS} ${EXTRA_LDFLAGS} ${_EXTRA_LIBS})
+     list(REMOVE_DUPLICATES SDL_STATIC_LIBS)
+-    listtostr(SDL_STATIC_LIBS _SDL_STATIC_LIBS)
++    listtostrrev(SDL_STATIC_LIBS _SDL_STATIC_LIBS)
+     set(SDL_STATIC_LIBS ${_SDL_STATIC_LIBS})
+-    listtostr(SDL_LIBS _SDL_LIBS)
++    listtostrrev(SDL_LIBS _SDL_LIBS)
+     set(SDL_LIBS ${_SDL_LIBS})
+   endif()
+ 
+@@ -2623,7 +2623,7 @@ if(SDL_STATIC)
+   add_library(SDL2-static STATIC ${SOURCE_FILES})
+   # alias target for in-tree builds
+   add_library(SDL2::SDL2-static ALIAS SDL2-static)
+-  if (NOT SDL_SHARED OR NOT WIN32)
++  if (NOT SDL_SHARED OR NOT MSVC)#WIN32)
+     set_target_properties(SDL2-static PROPERTIES OUTPUT_NAME "SDL2")
+     # Note: Apparently, OUTPUT_NAME must really be unique; even when
+     # CMAKE_IMPORT_LIBRARY_SUFFIX or the like are given. Otherwise
+@@ -2667,7 +2667,7 @@ install(TARGETS ${_INSTALL_LIBS} EXPORT SDL2Targets
+   RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+ 
+ ##### Export files #####
+-if (WINDOWS)
++if (MSVC) #WINDOWS)
+   set(PKG_PREFIX "cmake")
+ else ()
+   set(PKG_PREFIX "${CMAKE_INSTALL_LIBDIR}${LIB_SUFFIX}/cmake/SDL2")
+@@ -2708,11 +2708,11 @@ else()
+   set(SOPOSTFIX "")
+ endif()
+ 
+-if(NOT (WINDOWS OR CYGWIN OR MINGW))
++if(NOT (MSVC OR CYGWIN)) #(WINDOWS OR CYGWIN OR MINGW))
+   if(SDL_SHARED)
+     set(SOEXT ${CMAKE_SHARED_LIBRARY_SUFFIX}) # ".so", ".dylib", etc.
+     get_target_property(SONAME SDL2 OUTPUT_NAME)
+-    if(NOT ANDROID)
++    if(NOT ANDROID AND NOT MINGW)
+         install(CODE "
+           execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink
+             \"lib${SONAME}${SOPOSTFIX}${SOEXT}\" \"libSDL2${SOPOSTFIX}${SOEXT}\"
+diff --git a/include/SDL_video.h b/include/SDL_video.h
+index b6eb25582..747452547 100644
+--- a/include/SDL_video.h
++++ b/include/SDL_video.h
+@@ -207,7 +207,7 @@ typedef enum
+ {
+     SDL_FLASH_CANCEL,                   /**< Cancel any window flash state */
+     SDL_FLASH_BRIEFLY,                  /**< Flash the window briefly to get attention */
+-    SDL_FLASH_UNTIL_FOCUSED,            /**< Flash the window until it gets focus */
++    SDL_FLASH_UNTIL_FOCUSED             /**< Flash the window until it gets focus */
+ } SDL_FlashOperation;
+ 
+ /**
