@@ -2347,6 +2347,135 @@ DEF_METHOD(NV097, SET_EYE_DIRECTION)
     pg->ltctxa_dirty[NV_IGRAPH_XF_LTCTXA_EYED] = true;
 }
 
+static void pgraph_flush_draw(NV2AState *d)
+{
+    PGRAPHState *pg = &d->pgraph;
+
+    assert(pg->shader_binding);
+
+    if (pg->draw_arrays_length) {
+        nv2a_profile_inc_counter(NV2A_PROF_DRAW_ARRAYS);
+
+        NV2A_GL_DPRINTF(false, "Draw Arrays");
+
+        assert(pg->inline_buffer_length == 0);
+        assert(pg->inline_array_length == 0);
+        assert(pg->inline_elements_length == 0);
+
+        pgraph_bind_vertex_attributes(d, pg->draw_arrays_min_start,
+                                      pg->draw_arrays_max_count, false, 0);
+        glMultiDrawArrays(pg->shader_binding->gl_primitive_mode,
+                          pg->gl_draw_arrays_start,
+                          pg->gl_draw_arrays_count,
+                          pg->draw_arrays_length);
+    } else if (pg->inline_buffer_length) {
+        nv2a_profile_inc_counter(NV2A_PROF_INLINE_BUFFERS);
+
+        NV2A_GL_DPRINTF(false, "Inline Buffer");
+
+        assert(pg->draw_arrays_length == 0);
+        assert(pg->inline_array_length == 0);
+        assert(pg->inline_elements_length == 0);
+
+        if (pg->compressed_attrs) {
+            pg->compressed_attrs = 0;
+            pgraph_bind_shaders(pg);
+        }
+
+        for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
+            VertexAttribute *attr = &pg->vertex_attributes[i];
+            if (attr->inline_buffer_populated) {
+                nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_3);
+                glBindBuffer(GL_ARRAY_BUFFER, attr->gl_inline_buffer);
+                glBufferData(GL_ARRAY_BUFFER,
+                             pg->inline_buffer_length * sizeof(float) * 4,
+                             attr->inline_buffer, GL_STREAM_DRAW);
+                glVertexAttribPointer(i, 4, GL_FLOAT, GL_FALSE, 0, 0);
+                glEnableVertexAttribArray(i);
+                attr->inline_buffer_populated = false;
+            } else {
+                glDisableVertexAttribArray(i);
+                glVertexAttrib4fv(i, attr->inline_value);
+            }
+        }
+
+        glDrawArrays(pg->shader_binding->gl_primitive_mode,
+                     0, pg->inline_buffer_length);
+    } else if (pg->inline_array_length) {
+        nv2a_profile_inc_counter(NV2A_PROF_INLINE_ARRAYS);
+
+        NV2A_GL_DPRINTF(false, "Inline Array");
+
+        assert(pg->draw_arrays_length == 0);
+        assert(pg->inline_buffer_length == 0);
+        assert(pg->inline_elements_length == 0);
+
+        unsigned int index_count = pgraph_bind_inline_array(d);
+        glDrawArrays(pg->shader_binding->gl_primitive_mode,
+                     0, index_count);
+    } else if (pg->inline_elements_length) {
+        nv2a_profile_inc_counter(NV2A_PROF_INLINE_ELEMENTS);
+
+        NV2A_GL_DPRINTF(false, "Inline Elements");
+
+        assert(pg->draw_arrays_length == 0);
+        assert(pg->inline_buffer_length == 0);
+        assert(pg->inline_array_length == 0);
+
+        uint32_t min_element = (uint32_t)-1;
+        uint32_t max_element = 0;
+        for (int i=0; i < pg->inline_elements_length; i++) {
+            max_element = MAX(pg->inline_elements[i], max_element);
+            min_element = MIN(pg->inline_elements[i], min_element);
+        }
+
+        pgraph_bind_vertex_attributes(
+            d, min_element, max_element, false, 0);
+
+        VertexKey k;
+        memset(&k, 0, sizeof(VertexKey));
+        k.count = pg->inline_elements_length;
+        k.gl_type = GL_UNSIGNED_INT;
+        k.gl_normalize = GL_FALSE;
+        k.stride = sizeof(uint32_t);
+        uint64_t h = fast_hash((uint8_t*)pg->inline_elements,
+                               pg->inline_elements_length * 4);
+
+        LruNode *node = lru_lookup(&pg->element_cache, h, &k);
+        VertexLruNode *found = container_of(node, VertexLruNode, node);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, found->gl_buffer);
+        if (!found->initialized) {
+            nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_4);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                         pg->inline_elements_length * 4,
+                         pg->inline_elements, GL_STATIC_DRAW);
+            found->initialized = true;
+        } else {
+            nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_4_NOTDIRTY);
+        }
+        glDrawElements(pg->shader_binding->gl_primitive_mode,
+                       pg->inline_elements_length, GL_UNSIGNED_INT,
+                       (void *)0);
+    } else {
+        NV2A_GL_DPRINTF(true, "EMPTY NV097_SET_BEGIN_END");
+        NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
+    }
+
+    pg->inline_elements_length = 0;
+    pg->inline_array_length = 0;
+    pg->inline_buffer_length = 0;
+    pg->draw_arrays_length = 0;
+    pg->draw_arrays_min_start = -1;
+    pg->draw_arrays_max_count = 0;
+
+    bool depth_test =
+        pg->regs[NV_PGRAPH_CONTROL_0] & NV_PGRAPH_CONTROL_0_ZENABLE;
+    bool stencil_test =
+        pg->regs[NV_PGRAPH_CONTROL_1] & NV_PGRAPH_CONTROL_1_STENCIL_TEST_ENABLE;
+
+    pgraph_set_surface_dirty(pg, true, depth_test || stencil_test);
+}
+
 DEF_METHOD(NV097, SET_BEGIN_END)
 {
     bool depth_test =
@@ -2358,115 +2487,7 @@ DEF_METHOD(NV097, SET_BEGIN_END)
 
         nv2a_profile_inc_counter(NV2A_PROF_BEGIN_ENDS);
 
-        assert(pg->shader_binding);
-
-        if (pg->draw_arrays_length) {
-            nv2a_profile_inc_counter(NV2A_PROF_DRAW_ARRAYS);
-
-            NV2A_GL_DPRINTF(false, "Draw Arrays");
-
-            assert(pg->inline_buffer_length == 0);
-            assert(pg->inline_array_length == 0);
-            assert(pg->inline_elements_length == 0);
-
-            pgraph_bind_vertex_attributes(d, pg->draw_arrays_min_start,
-                                          pg->draw_arrays_max_count, false, 0);
-            glMultiDrawArrays(pg->shader_binding->gl_primitive_mode,
-                              pg->gl_draw_arrays_start,
-                              pg->gl_draw_arrays_count,
-                              pg->draw_arrays_length);
-        } else if (pg->inline_buffer_length) {
-            nv2a_profile_inc_counter(NV2A_PROF_INLINE_BUFFERS);
-
-            NV2A_GL_DPRINTF(false, "Inline Buffer");
-
-            assert(pg->draw_arrays_length == 0);
-            assert(pg->inline_array_length == 0);
-            assert(pg->inline_elements_length == 0);
-
-            if (pg->compressed_attrs) {
-                pg->compressed_attrs = 0;
-                pgraph_bind_shaders(pg);
-            }
-
-            for (int i = 0; i < NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
-                VertexAttribute *attr = &pg->vertex_attributes[i];
-                if (attr->inline_buffer_populated) {
-                    nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_3);
-                    glBindBuffer(GL_ARRAY_BUFFER, attr->gl_inline_buffer);
-                    glBufferData(GL_ARRAY_BUFFER,
-                                 pg->inline_buffer_length * sizeof(float) * 4,
-                                 attr->inline_buffer, GL_STREAM_DRAW);
-                    glVertexAttribPointer(i, 4, GL_FLOAT, GL_FALSE, 0, 0);
-                    glEnableVertexAttribArray(i);
-                    attr->inline_buffer_populated = false;
-                } else {
-                    glDisableVertexAttribArray(i);
-                    glVertexAttrib4fv(i, attr->inline_value);
-                }
-            }
-
-            glDrawArrays(pg->shader_binding->gl_primitive_mode,
-                         0, pg->inline_buffer_length);
-        } else if (pg->inline_array_length) {
-            nv2a_profile_inc_counter(NV2A_PROF_INLINE_ARRAYS);
-
-            NV2A_GL_DPRINTF(false, "Inline Array");
-
-            assert(pg->draw_arrays_length == 0);
-            assert(pg->inline_buffer_length == 0);
-            assert(pg->inline_elements_length == 0);
-
-            unsigned int index_count = pgraph_bind_inline_array(d);
-            glDrawArrays(pg->shader_binding->gl_primitive_mode,
-                         0, index_count);
-        } else if (pg->inline_elements_length) {
-            nv2a_profile_inc_counter(NV2A_PROF_INLINE_ELEMENTS);
-
-            NV2A_GL_DPRINTF(false, "Inline Elements");
-
-            assert(pg->draw_arrays_length == 0);
-            assert(pg->inline_buffer_length == 0);
-            assert(pg->inline_array_length == 0);
-
-            uint32_t min_element = (uint32_t)-1;
-            uint32_t max_element = 0;
-            for (int i=0; i < pg->inline_elements_length; i++) {
-                max_element = MAX(pg->inline_elements[i], max_element);
-                min_element = MIN(pg->inline_elements[i], min_element);
-            }
-
-            pgraph_bind_vertex_attributes(
-                d, min_element, max_element, false, 0);
-
-            VertexKey k;
-            memset(&k, 0, sizeof(VertexKey));
-            k.count = pg->inline_elements_length;
-            k.gl_type = GL_UNSIGNED_INT;
-            k.gl_normalize = GL_FALSE;
-            k.stride = sizeof(uint32_t);
-            uint64_t h = fast_hash((uint8_t*)pg->inline_elements,
-                                   pg->inline_elements_length * 4);
-
-            LruNode *node = lru_lookup(&pg->element_cache, h, &k);
-            VertexLruNode *found = container_of(node, VertexLruNode, node);
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, found->gl_buffer);
-            if (!found->initialized) {
-                nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_4);
-                glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-                             pg->inline_elements_length * 4,
-                             pg->inline_elements, GL_STATIC_DRAW);
-                found->initialized = true;
-            } else {
-                nv2a_profile_inc_counter(NV2A_PROF_GEOM_BUFFER_UPDATE_4_NOTDIRTY);
-            }
-            glDrawElements(pg->shader_binding->gl_primitive_mode,
-                           pg->inline_elements_length, GL_UNSIGNED_INT,
-                           (void *)0);
-        } else {
-            NV2A_GL_DPRINTF(true, "EMPTY NV097_SET_BEGIN_END");
-            NV2A_UNCONFIRMED("EMPTY NV097_SET_BEGIN_END");
-        }
+        pgraph_flush_draw(d);
 
         /* End of visibility testing */
         if (pg->zpass_pixel_count_enable) {
@@ -2849,6 +2870,13 @@ DEF_METHOD(NV097, DRAW_ARRAYS)
     unsigned int start = GET_MASK(parameter, NV097_DRAW_ARRAYS_START_INDEX);
     unsigned int count = GET_MASK(parameter, NV097_DRAW_ARRAYS_COUNT)+1;
 
+    /* FIXME */
+    assert((pg->inline_elements_length+count) < NV2A_MAX_BATCH_LENGTH);
+    for (unsigned int i = 0; i < count; i++) {
+        pg->inline_elements[pg->inline_elements_length++] = start + i;
+    }
+
+#if 0
     pg->draw_arrays_min_start = MIN(pg->draw_arrays_min_start, start);
     pg->draw_arrays_max_count = MAX(pg->draw_arrays_max_count, start + count);
 
@@ -2870,6 +2898,7 @@ DEF_METHOD(NV097, DRAW_ARRAYS)
     pg->gl_draw_arrays_count[pg->draw_arrays_length] = count;
     pg->draw_arrays_length++;
     pg->draw_arrays_prevent_connect = false;
+#endif
 }
 
 DEF_METHOD(NV097, INLINE_ARRAY)
