@@ -5359,7 +5359,8 @@ static void pgraph_populate_surface_binding_entry_sized(NV2AState *d,
     entry->vram_addr = dma.address + surface->offset;
     entry->width = width;
     entry->height = height;
-    entry->pitch = surface->pitch;
+    entry->pitch = entry->swizzle ? (entry->width * entry->fmt.bytes_per_pixel)
+                                  : surface->pitch;
     entry->size = height * surface->pitch;
     entry->upload_pending = true;
     entry->download_pending = false;
@@ -5368,6 +5369,8 @@ static void pgraph_populate_surface_binding_entry_sized(NV2AState *d,
     entry->dma_len = dma.limit;
     entry->frame_time = pg->frame_time;
     entry->draw_time = pg->draw_time;
+
+    assert(entry->pitch >= (entry->width * entry->fmt.bytes_per_pixel));
 }
 
 static void pgraph_populate_surface_binding_entry(NV2AState *d, bool color,
@@ -5380,11 +5383,13 @@ static void pgraph_populate_surface_binding_entry(NV2AState *d, bool color,
         pgraph_get_surface_dimensions(pg, &width, &height);
         pgraph_apply_anti_aliasing_factor(pg, &width, &height);
 
-        /* Since we determine surface dimensions based on the clipping
-         * rectangle, make sure to include the surface offset as well.
-         */
-        width += pg->surface_shape.clip_x;
-        height += pg->surface_shape.clip_y;
+        if (pg->surface_type != NV097_SET_SURFACE_FORMAT_TYPE_SWIZZLE) {
+            /* Since we determine surface dimensions based on the clipping
+             * rectangle, make sure to include the surface offset as well.
+             */
+            width += pg->surface_shape.clip_x;
+            height += pg->surface_shape.clip_y; /* FIXME */
+        }
     } else {
         width = pg->color_binding->width;
         height = pg->color_binding->height;
