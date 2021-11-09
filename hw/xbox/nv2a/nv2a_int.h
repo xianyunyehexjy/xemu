@@ -227,6 +227,14 @@ typedef struct ImageBlitState {
     unsigned int width, height;
 } ImageBlitState;
 
+typedef struct QueryReport {
+    QSIMPLEQ_ENTRY(QueryReport) entry;
+    bool clear;
+    uint32_t parameter;
+    unsigned int query_count;
+    GLuint *queries;
+} QueryReport;
+
 typedef struct PGRAPHState {
     QemuMutex lock;
 
@@ -303,6 +311,7 @@ typedef struct PGRAPHState {
     unsigned int zpass_pixel_count_result;
     unsigned int gl_zpass_pixel_count_query_count;
     GLuint *gl_zpass_pixel_count_queries;
+    QSIMPLEQ_HEAD(, QueryReport) report_queue;
 
     hwaddr dma_vertex_a, dma_vertex_b;
 
@@ -512,6 +521,7 @@ int pgraph_method(NV2AState *d, unsigned int subchannel, unsigned int method,
                   uint32_t parameter, uint32_t *parameters,
                   size_t num_words_available, size_t max_lookahead_words);
 void pgraph_gl_sync(NV2AState *d);
+void pgraph_process_report_queue(NV2AState *d);
 void pgraph_process_pending_downloads(NV2AState *d);
 void pgraph_download_dirty_surfaces(NV2AState *d);
 void pgraph_flush(NV2AState *d);
