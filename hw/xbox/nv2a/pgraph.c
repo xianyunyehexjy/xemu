@@ -856,13 +856,8 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
 
         if (image_blit->width && image_blit->height) {
             if (image_blit->operation == NV09F_SET_OPERATION_SRCCOPY) {
-
                 NV2A_GL_DPRINTF(true, "NV09F_SET_OPERATION_SRCCOPY");
-
-                pgraph_update_surface(d,
-                                      false,
-                                      true,
-                                      true);
+                pgraph_update_surface(d, false, true, true);
 
                 ContextSurfaces2DState *context_surfaces = context_surfaces_2d;
                 assert(context_surfaces->object_instance
@@ -870,91 +865,93 @@ int pgraph_method(NV2AState *d, unsigned int subchannel,
 
                 unsigned int bytes_per_pixel;
                 switch (context_surfaces->color_format) {
-                    case NV062_SET_COLOR_FORMAT_LE_Y8:bytes_per_pixel = 1;
-                        break;
-                    case NV062_SET_COLOR_FORMAT_LE_R5G6B5:bytes_per_pixel = 2;
-                        break;
-                    case NV062_SET_COLOR_FORMAT_LE_A8R8G8B8:
-                    case NV062_SET_COLOR_FORMAT_LE_X8R8G8B8:
-                    case NV062_SET_COLOR_FORMAT_LE_Y32:bytes_per_pixel = 4;
-                        break;
-                    default:
-                        fprintf(stderr,
-                                "Unknown blit surface format: 0x%x\n",
-                                context_surfaces->color_format);
-                        assert(false);
-                        break;
+                case NV062_SET_COLOR_FORMAT_LE_Y8:
+                    bytes_per_pixel = 1;
+                    break;
+                case NV062_SET_COLOR_FORMAT_LE_R5G6B5:
+                    bytes_per_pixel = 2;
+                    break;
+                case NV062_SET_COLOR_FORMAT_LE_A8R8G8B8:
+                case NV062_SET_COLOR_FORMAT_LE_X8R8G8B8:
+                case NV062_SET_COLOR_FORMAT_LE_Y32:
+                    bytes_per_pixel = 4;
+                    break;
+                default:
+                    fprintf(stderr, "Unknown blit surface format: 0x%x\n",
+                            context_surfaces->color_format);
+                    assert(false);
+                    break;
                 }
 
                 hwaddr source_dma_len, dest_dma_len;
-                uint8_t *source, *dest;
 
-                source = (uint8_t *) nv_dma_map(
-                        d, context_surfaces->dma_image_source, &source_dma_len);
+                uint8_t *source = (uint8_t *)nv_dma_map(
+                    d, context_surfaces->dma_image_source, &source_dma_len);
                 assert(context_surfaces->source_offset < source_dma_len);
                 source += context_surfaces->source_offset;
 
-                dest = (uint8_t *) nv_dma_map(d,
-                                              context_surfaces->dma_image_dest,
-                                              &dest_dma_len);
+                uint8_t *dest = (uint8_t *)nv_dma_map(
+                    d, context_surfaces->dma_image_dest, &dest_dma_len);
                 assert(context_surfaces->dest_offset < dest_dma_len);
                 dest += context_surfaces->dest_offset;
 
-                NV2A_DPRINTF("  - 0x%tx -> 0x%tx\n", source - d->vram_ptr,
-                             dest - d->vram_ptr);
+                hwaddr source_addr = source - d->vram_ptr;
+                hwaddr dest_addr = dest - d->vram_ptr;
+                NV2A_DPRINTF("  - 0x%tx -> 0x%tx\n", source_addr, dest_addr);
 
-
-                // FIXME: Blitting from part of a surface
-
-                SurfaceBinding *surf_src = pgraph_surface_get(
-                        d, source - d->vram_ptr);
+                SurfaceBinding *surf_src = pgraph_surface_get(d, source_addr);
                 if (surf_src) {
                     pgraph_download_surface_data(d, surf_src, true);
                 }
 
-                SurfaceBinding *surf_dest = pgraph_surface_get(
-                        d, dest - d->vram_ptr);
+                SurfaceBinding *surf_dest = pgraph_surface_get(d, dest_addr);
                 if (surf_dest) {
                     if (image_blit->height < surf_dest->height ||
-                            image_blit->width < surf_dest->width) {
-
+                        image_blit->width < surf_dest->width) {
                         pgraph_download_surface_data_if_dirty(d, surf_dest);
                     }
                     surf_dest->upload_pending = true;
                 }
 
-                uint32_t bytes_per_row = image_blit->width * bytes_per_pixel;
-                int y;
-                unsigned int source_pitch = context_surfaces->source_pitch;
-                unsigned int dest_pitch = context_surfaces->dest_pitch;
-                for (y = 0; y < image_blit->height; y++) {
-                    uint8_t *source_row = source
-                            + (image_blit->in_y + y) * source_pitch
-                            + image_blit->in_x * bytes_per_pixel;
+                hwaddr source_offset =
+                    image_blit->in_y * context_surfaces->source_pitch +
+                    image_blit->in_x * bytes_per_pixel;
+                hwaddr source_size =
+                    (image_blit->height - 1) * context_surfaces->source_pitch +
+                    image_blit->width * bytes_per_pixel;
 
-                    uint8_t *dest_row = dest
-                            + (image_blit->out_y + y) * dest_pitch
-                            + image_blit->out_x * bytes_per_pixel;
+                /* FIXME: What does hardware do in this case? */
+                assert(source_addr + source_offset + source_size <=
+                       memory_region_size(d->vram));
 
+                hwaddr dest_offset =
+                    image_blit->out_y * context_surfaces->dest_pitch +
+                    image_blit->out_x;
+                hwaddr dest_size =
+                    (image_blit->height - 1) * context_surfaces->dest_pitch +
+                    image_blit->width * bytes_per_pixel;
+
+                /* FIXME: What does hardware do in this case? */
+                assert(dest_addr + dest_offset + dest_size <=
+                       memory_region_size(d->vram));
+
+                uint8_t *source_row = source + source_offset;
+                uint8_t *dest_row = dest + dest_offset;
+                size_t bytes_per_row = image_blit->width * bytes_per_pixel;
+
+                for (unsigned int y = 0; y < image_blit->height; y++) {
                     memmove(dest_row, source_row, bytes_per_row);
+                    source_row += context_surfaces->source_pitch;
+                    dest_row += context_surfaces->dest_pitch;
                 }
 
-                hwaddr dest_start = image_blit->out_x +
-                        image_blit->out_y * context_surfaces->dest_pitch;
-                hwaddr dirty_start = dest - d->vram_ptr + dest_start;
-                uint32_t dirty_size = image_blit->width * bytes_per_pixel +
-                        (image_blit->height - 1) * context_surfaces->dest_pitch;
-                memory_region_set_client_dirty(d->vram,
-                                               dirty_start,
-                                               dirty_size,
+                dest_addr += dest_offset;
+                memory_region_set_client_dirty(d->vram, dest_addr, dest_size,
                                                DIRTY_MEMORY_VGA);
-                memory_region_set_client_dirty(d->vram,
-                                               dirty_start,
-                                               dirty_size,
+                memory_region_set_client_dirty(d->vram, dest_addr, dest_size,
                                                DIRTY_MEMORY_NV2A_TEX);
             } else {
-                fprintf(stderr,
-                        "Unknown blit operation: 0x%x\n",
+                fprintf(stderr, "Unknown blit operation: 0x%x\n",
                         image_blit->operation);
                 assert(false);
             }
